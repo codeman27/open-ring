@@ -44,6 +44,37 @@ function redactedHex(data: Uint8Array): string {
   return toHex(data);
 }
 
+/** False when the OS reports no usable Bluetooth radio (off, or no permission). */
+export async function bluetoothAvailable(): Promise<boolean | undefined> {
+  try {
+    return await navigator.bluetooth?.getAvailability();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Turn a Web Bluetooth failure into an actionable message, keeping Chrome's own
+ * text since it usually names the real cause (adapter off, permission, cancel).
+ */
+export function explainBluetoothError(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e);
+  const name = e instanceof DOMException ? e.name : '';
+  if (name === 'NotFoundError' && /cancel/i.test(msg)) {
+    return 'The Bluetooth picker was closed without choosing a device. If your ring was not listed, see "Ring not showing up?" below.';
+  }
+  if (name === 'NotFoundError' && /adapter/i.test(msg)) {
+    return `Chrome says: "${msg}". Turn Bluetooth on (and Location, on older Android), then try again.`;
+  }
+  if (name === 'NotAllowedError' || name === 'SecurityError') {
+    return `Chrome says: "${msg}". Allow Chrome the "Nearby devices" permission: Android Settings → Apps → Chrome → Permissions → Nearby devices → Allow.`;
+  }
+  if (name === 'NetworkError') {
+    return `Chrome says: "${msg}". The ring dropped the connection. Remove it from the charger, put it back, wait a few seconds and retry. If Android shows a pairing request, accept it.`;
+  }
+  return name ? `${name}: ${msg}` : msg;
+}
+
 export function bluetoothSupport(): string | null {
   if (!window.isSecureContext) {
     return 'Web Bluetooth needs a secure context: open this app over HTTPS or http://localhost.';
@@ -81,13 +112,18 @@ export class RingLink implements Transport {
   ) {}
 
   /** Show the browser's device picker filtered to Oura rings. Needs a user gesture. */
-  static async pick(): Promise<BluetoothDevice> {
-    return navigator.bluetooth.requestDevice({
-      // A freshly reset ring may not advertise an "Oura" name, but always
-      // advertises the service.
-      filters: [{ services: [OURA_SERVICE] }, { namePrefix: 'Oura' }],
-      optionalServices: [OURA_SERVICE],
-    });
+  static async pick(showAll = false): Promise<BluetoothDevice> {
+    protocolLog.push('info', `opening Bluetooth picker (${showAll ? 'all devices' : 'Oura filter'})`);
+    return navigator.bluetooth.requestDevice(
+      showAll
+        ? { acceptAllDevices: true, optionalServices: [OURA_SERVICE] }
+        : {
+            // A reset Ring 4 advertises as "Oura <serial digits>" with the service
+            // UUID and Oura's manufacturer ID (0x02b2); any one is enough to match.
+            filters: [{ services: [OURA_SERVICE] }, { namePrefix: 'Oura' }, { manufacturerData: [{ companyIdentifier: 0x02b2 }] }],
+            optionalServices: [OURA_SERVICE],
+          },
+    );
   }
 
   /**

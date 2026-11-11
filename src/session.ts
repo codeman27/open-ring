@@ -14,6 +14,8 @@ export class RingSession {
   private link?: RingLink;
   private client?: OuraClient;
   private authedKey?: string;
+  /** Show every nearby Bluetooth device in the picker instead of filtering for Oura. */
+  showAllDevices = false;
 
   get connected(): boolean {
     return !!this.link?.connected;
@@ -33,7 +35,7 @@ export class RingSession {
     this.device ??= (await RingLink.known(deviceId)) ?? undefined;
     if (!this.device) {
       step('Choose your ring in the Bluetooth picker…');
-      this.device = await RingLink.pick();
+      this.device = await RingLink.pick(this.showAllDevices);
     }
     step(`Connecting to ${this.device.name ?? 'ring'}…`);
     this.link = await RingLink.open(this.device);

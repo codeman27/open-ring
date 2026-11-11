@@ -416,3 +416,12 @@ input:not([type='checkbox']) {
   color: var(--text);
   background: var(--line);
 }
+
+.trouble summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.trouble[open] summary {
+  margin-bottom: 10px;
+}

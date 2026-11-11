@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { bluetoothSupport, protocolLog, type LogEntry } from './ble';
+import { bluetoothAvailable, bluetoothSupport, explainBluetoothError, protocolLog, type LogEntry } from './ble';
 import { AuthError } from './client';
 import {
   activeRing,
@@ -74,6 +74,16 @@ export function App() {
   const [connected, setConnected] = useState(false);
   const abort = useRef<AbortController | null>(null);
   const support = bluetoothSupport();
+  const [radio, setRadio] = useState<boolean | undefined>(undefined);
+
+  useEffect(() => {
+    if (support) return;
+    bluetoothAvailable().then(setRadio);
+    const bt = navigator.bluetooth as Bluetooth & EventTarget;
+    const onChange = (e: Event) => setRadio((e as Event & { value?: boolean }).value);
+    bt.addEventListener?.('availabilitychanged', onChange);
+    return () => bt.removeEventListener?.('availabilitychanged', onChange);
+  }, [support]);
 
   const refresh = useCallback(async () => {
     const r = await activeRing();
@@ -102,14 +112,14 @@ export function App() {
         protocolLog.push('info', m);
       });
     } catch (e) {
-      if (e instanceof DOMException && e.name === 'NotFoundError') {
-        setError('No ring was selected. If your ring is not listed, put it on the charger for a moment and try again.');
-      } else if (e instanceof AuthError && e.code === 2) {
+      if (e instanceof AuthError && e.code === 2) {
         setError(`${errText(e)}. Use "Pair a factory-reset ring" under the Ring tab.`);
+      } else if (e instanceof DOMException) {
+        setError(explainBluetoothError(e));
       } else {
         setError(errText(e));
       }
-      protocolLog.push('info', `error: ${errText(e)}`);
+      protocolLog.push('info', `error: ${e instanceof DOMException ? `${e.name}: ` : ''}${errText(e)}`);
       return undefined;
     } finally {
       setBusy(null);
@@ -149,6 +159,11 @@ export function App() {
       </header>
 
       {support && <div class="banner error">{support}</div>}
+      {!support && radio === false && (
+        <div class="banner error">
+          Chrome reports no usable Bluetooth. Turn Bluetooth on, and make sure Chrome has the "Nearby devices" permission (Android Settings → Apps → Chrome → Permissions).
+        </div>
+      )}
       {busy && (
         <div class="banner busy">
           <span class="spinner" /> {busy}
@@ -197,6 +212,38 @@ export function App() {
 
 type Run = <T>(label: string, fn: (step: (m: string) => void) => Promise<T>) => Promise<T | undefined>;
 
+function Troubleshoot() {
+  const [all, setAll] = useState(session.showAllDevices);
+  return (
+    <details class="card trouble">
+      <summary>Ring not showing up?</summary>
+      <ol class="steps small">
+        <li>
+          The ring lists as <strong>"Oura"</strong> followed by a long number (for example <span class="mono">Oura 4016…</span>), not "Oura Ring 4".
+        </li>
+        <li>Bluetooth on. On Android 11 or older, Location must be on too.</li>
+        <li>Chrome needs the "Nearby devices" permission: Android Settings → Apps → Chrome → Permissions → Nearby devices → Allow.</li>
+        <li>
+          Stop the Oura app so it can't grab the ring: long-press its icon → App info → Force stop (or uninstall it). A ring can only talk to one app at a time.
+        </li>
+        <li>In Android Bluetooth settings, forget any old "Oura" entry.</li>
+        <li>Lift the ring off the charger and set it back on: it advertises most reliably right after that.</li>
+      </ol>
+      <label class="check">
+        <input
+          type="checkbox"
+          checked={all}
+          onChange={(e) => {
+            session.showAllDevices = (e.target as HTMLInputElement).checked;
+            setAll(session.showAllDevices);
+          }}
+        />
+        Show all nearby Bluetooth devices in the picker (use this if the ring still isn't listed)
+      </label>
+    </details>
+  );
+}
+
 function Onboarding({ run, disabled, onPaired }: { run: Run; disabled: boolean; onPaired: () => void }) {
   const [probeResult, setProbe] = useState<ProbeResult | null>(null);
   const [confirmed, setConfirmed] = useState(false);
@@ -204,13 +251,11 @@ function Onboarding({ run, disabled, onPaired }: { run: Run; disabled: boolean; 
 
   return (
     <>
+      <Troubleshoot />
       <section class="card">
         <h2>1. Check the connection</h2>
         <p class="muted">
-          Reads the ring's firmware, serial and capabilities. Nothing on the ring changes, so this is safe while the Oura app is still paired.
-        </p>
-        <p class="muted small">
-          Ring not in the list? While the Oura app holds a connection the ring may stop advertising: force-stop the Oura app (long-press its icon → App info → Force stop), then try again.
+          Reads the ring's firmware, serial and capabilities. Nothing on the ring changes. Works on a freshly reset ring too.
         </p>
         <button disabled={disabled} onClick={() => run('Checking…', async (step) => setProbe(await probe(session, step)))}>
           Check connection
