@@ -1,0 +1,33 @@
+{
+  "name": "oura-pwa",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Cloud-free Oura ring PWA over Web Bluetooth, built on open_oura's protocol crate",
+  "scripts": {
+    "wasm": "bash scripts/build-wasm.sh",
+    "icons": "node scripts/make-icons.mjs",
+    "predev": "npm run wasm",
+    "dev": "vite",
+    "predev:phone": "npm run wasm",
+    "dev:phone": "node scripts/dev-phone.mjs",
+    "prebuild": "npm run wasm",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run && cargo test --manifest-path wasm/Cargo.toml"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.10.6",
+    "@types/node": "^26.6.6",
+    "@types/web-bluetooth": "^0.0.22",
+    "preact": "^11.2.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "vite-plugin-pwa": "^2.0.0",
+    "vitest": "^5.1.0"
+  },
+  "dependencies": {
+    "idb": "^8.0.4"
+  }
+}

@@ -1,0 +1,92 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  # The WASM bridge compiles open_oura's protocol crate; pin the revision it was tested against.
+  OPEN_OURA_REF: e57c43ce5fe0cf9a646afa790bda3731be767507
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: oura-pwa
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: oura-pwa
+      - uses: actions/checkout@v7
+        with:
+          repository: Th0rgal/open_oura
+          ref: ${{ env.OPEN_OURA_REF }}
+          path: open_oura
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: oura-pwa/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+      - name: Install dependencies
+        run: npm ci
+      - name: Build WASM bridge
+        run: npm run wasm
+      - name: Test
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Set AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+      - name: Upload immutable assets
+        env:
+          SITE_BUCKET: ${{ secrets.SITE_BUCKET }}
+        run: >
+          aws s3 sync dist/assets "s3://${SITE_BUCKET}/assets"
+          --delete --cache-control "public, max-age=31536000, immutable"
+      - name: Set WebAssembly content type
+        env:
+          SITE_BUCKET: ${{ secrets.SITE_BUCKET }}
+        run: >
+          aws s3 cp dist/assets "s3://${SITE_BUCKET}/assets" --recursive
+          --exclude "*" --include "*.wasm"
+          --content-type "application/wasm"
+          --cache-control "public, max-age=31536000, immutable"
+      - name: Upload site files
+        env:
+          SITE_BUCKET: ${{ secrets.SITE_BUCKET }}
+        run: >
+          aws s3 sync dist/ "s3://${SITE_BUCKET}"
+          --delete
+          --exclude "assets/*"
+          --cache-control "no-cache"
+      - name: Set manifest content type
+        env:
+          SITE_BUCKET: ${{ secrets.SITE_BUCKET }}
+        run: >
+          aws s3 cp dist/manifest.webmanifest
+          "s3://${SITE_BUCKET}/manifest.webmanifest"
+          --content-type "application/manifest+json"
+          --cache-control "no-cache"
+      - name: Invalidate CloudFront
+        env:
+          DISTRIBUTION_ID: ${{ secrets.DISTRIBUTION_ID }}
+        run: aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" --paths "/*"
