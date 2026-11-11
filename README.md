@@ -1,5 +1,9 @@
 # Open Ring (PWA)
 
+**Live:** <https://open-ring.cody-roof.com>. On an Android phone, open it in Chrome and choose
+*Install app* (or menu → *Add to Home screen*). Nothing else is needed on the phone: no developer
+mode or Chrome flags. After the first load it works offline.
+
 A cloud-free Oura ring app that runs in Chrome on Android and talks to the ring
 directly over **Web Bluetooth**. Data never leaves the phone; it is stored in the
 browser's IndexedDB.
@@ -35,8 +39,9 @@ npm test             # vitest (client + timeline) and the Rust bridge tests
 npm run build        # type-check + production PWA in dist/
 ```
 
-### Testing on your phone: `npm run dev:phone`
+### Testing local changes on your phone: `npm run dev:phone`
 
+Only needed for trying unreleased changes; the live site needs none of this.
 Web Bluetooth only works on a secure origin (HTTPS or `http://localhost`), so a
 plain LAN address won't work. `dev:phone` serves on all interfaces and, if a phone
 is attached over `adb`, runs `adb reverse tcp:5173 tcp:5173` so **the phone's own
@@ -71,6 +76,14 @@ Chrome.
    without another factory reset, and it also works with the open_oura CLI
    (`oura --key-file oura-<serial>.key sync`).
 4. **Sync** whenever you open the app. The ring buffers several days of history.
+
+## Deployment
+
+Pushing to `main` runs `.github/workflows/deploy.yml`: it checks out open_oura at a
+pinned commit beside this repo, builds the WASM bridge, runs the tests, builds, and
+syncs `dist/` to a private S3 bucket behind CloudFront (stack `open-ring-site`,
+template `deploy/infra.yml`). The CSP allows `'wasm-unsafe-eval'` (required to
+instantiate WebAssembly) and `Permissions-Policy` grants `bluetooth=(self)`.
 
 ## Limits of the PWA (vs. a native app)
 
