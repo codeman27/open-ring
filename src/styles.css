@@ -421,6 +421,10 @@ input:not([type='checkbox']) {
   background: var(--line);
 }
 
+.version {
+  margin: 16px 0 8px;
+}
+
 .trouble summary {
   cursor: pointer;
   font-weight: 600;

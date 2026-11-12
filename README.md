@@ -79,6 +79,11 @@ Chrome.
 
 ## Deployment
 
+Every change that ships bumps `version` in `package.json` (`npm version patch|minor
+--no-git-tag-version`). The app shows `v<version> · <commit> · built <time>` at the
+bottom of every screen and at the top of the Bluetooth log, so you can confirm which
+build the phone is running.
+
 Pushing to `main` runs `.github/workflows/deploy.yml`: it checks out open_oura at a
 pinned commit beside this repo, builds the WASM bridge, runs the tests, builds, and
 syncs `dist/` to a private S3 bucket behind CloudFront (stack `open-ring-site`,

@@ -28,6 +28,7 @@ import {
 } from './session';
 import { RingClock, SUMMARY_TAGS, dayKey, summarize, type Summary } from './timeline';
 import { Bars, LineChart } from './charts';
+import { versionLabel } from './version';
 
 const session = new RingSession();
 
@@ -197,6 +198,7 @@ export function App() {
         {ring && tab === 'today' && <Today summary={summary} sync={sync} ring={ring} run={run} disabled={!!busy || !!support} />}
         {ring && tab === 'trends' && <Trends summary={summary} />}
         {ring && tab === 'ring' && <RingTab ring={ring} sync={sync} run={run} disabled={!!busy || !!support} onChange={refresh} />}
+        <p class="version small muted center">Open Ring {versionLabel()}</p>
       </main>
 
       {ring && (
