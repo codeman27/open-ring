@@ -46,6 +46,9 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,wasm}'],
+        // Required explicitly: with injectRegister false the plugin doesn't set them.
+        skipWaiting: true,
+        clientsClaim: true,
       },
       devOptions: { enabled: false },
     }),
