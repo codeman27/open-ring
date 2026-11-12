@@ -41,7 +41,7 @@ export class RingSession {
       }
     }
     step(`Connecting to ${this.device.name ?? 'ring'}…`);
-    this.link = await RingLink.open(this.device);
+    this.link = await RingLink.open(this.device, step);
     this.authedKey = undefined;
     this.link.disconnectListeners.add(() => (this.authedKey = undefined));
     protocolLog.push('info', `connected to ${this.device.name ?? this.device.id}`);

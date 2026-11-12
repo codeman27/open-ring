@@ -149,7 +149,7 @@ export class RingLink implements Transport {
     }
   }
 
-  static async open(device: BluetoothDevice): Promise<RingLink> {
+  static async open(device: BluetoothDevice, onStage?: (message: string) => void): Promise<RingLink> {
     if (!device.gatt) throw new Error('device has no GATT server');
     const stage = async <T,>(what: string, p: Promise<T>): Promise<T> => {
       protocolLog.push('info', `${what}…`);
@@ -187,7 +187,20 @@ export class RingLink implements Transport {
       });
       const short = c.uuid.slice(4, 8);
       if (c.uuid === OURA_NOTIFY) {
-        await stage(`subscribing to channel ${short}`, c.startNotifications());
+        // The ring asks for a bond on this subscribe. On Android the operation that
+        // triggers bonding often fails even when the bond succeeds, so retry once the
+        // pairing has had a chance to finish.
+        onStage?.('Subscribing to the ring. If Android shows a pairing request (check notifications), tap Pair.');
+        for (let attempt = 1; ; attempt++) {
+          try {
+            await stage(`subscribing to channel ${short} (attempt ${attempt})`, c.startNotifications());
+            break;
+          } catch (e) {
+            if (attempt >= 3 || !device.gatt?.connected) throw e;
+            onStage?.(`Subscribing failed; retrying (${attempt + 1}/3)…`);
+            await new Promise((r) => setTimeout(r, 2000));
+          }
+        }
       } else {
         await c.startNotifications().then(
           () => protocolLog.push('info', `subscribed to optional channel ${short}`),
