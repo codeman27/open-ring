@@ -1,12 +1,11 @@
 {
   "name": "oura-pwa",
   "private": true,
-  "version": "0.3.3",
+  "version": "0.4.0",
   "type": "module",
   "description": "Cloud-free Oura ring PWA over Web Bluetooth, built on open_oura's protocol crate",
   "scripts": {
     "wasm": "bash scripts/build-wasm.sh",
-    "icons": "node scripts/make-icons.mjs",
     "predev": "npm run wasm",
     "dev": "vite",
     "predev:phone": "npm run wasm",
