@@ -24,7 +24,10 @@ export default defineConfig({
   plugins: [
     preact(),
     VitePWA({
-      registerType: 'prompt',
+      // The SW activates new versions immediately (skipWaiting + clientsClaim). It is
+      // registered manually in main.tsx, which offers a reload instead of forcing one.
+      registerType: 'autoUpdate',
+      injectRegister: false,
       includeAssets: ['icon.svg'],
       manifest: {
         name: 'Open Ring',
