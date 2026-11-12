@@ -7,6 +7,7 @@
 
 export const OURA_SERVICE = '98ed0001-a541-11e4-b6a0-0002a5d5c51b';
 export const OURA_WRITE = '98ed0002-a541-11e4-b6a0-0002a5d5c51b';
+export const OURA_NOTIFY = '98ed0003-a541-11e4-b6a0-0002a5d5c51b';
 
 const CONNECT_TIMEOUT_MS = 30_000;
 
@@ -72,6 +73,9 @@ export function explainBluetoothError(e: unknown): string {
   if (name === 'NetworkError') {
     return `Chrome says: "${msg}". The ring dropped the connection. Remove it from the charger, put it back, wait a few seconds and retry. If Android shows a pairing request, accept it.`;
   }
+  if (name === 'NotSupportedError' && /GATT/i.test(msg)) {
+    return `Chrome says: "${msg}". The ring itself accepts this connection, so Android is usually holding an old Bluetooth bond from the Oura app. In Android Settings → Connected devices, forget every "Oura" entry (including under "Previously connected devices"), turn Bluetooth off and on, lift the ring off the charger and back, then retry.`;
+  }
   return name ? `${name}: ${msg}` : msg;
 }
 
@@ -79,8 +83,13 @@ export function bluetoothSupport(): string | null {
   if (!window.isSecureContext) {
     return 'Web Bluetooth needs a secure context: open this app over HTTPS or http://localhost.';
   }
-  if (!('bluetooth' in navigator)) {
-    return 'This browser has no Web Bluetooth. Use Chrome on Android (or desktop Chrome/Edge).';
+  const isBrave = 'brave' in navigator;
+  const bt = (navigator as Navigator & { bluetooth?: Bluetooth }).bluetooth;
+  if (isBrave && (!bt || /Android/i.test(navigator.userAgent))) {
+    return 'Brave does not support Bluetooth for websites on Android. Open this page in Google Chrome to connect to your ring.';
+  }
+  if (!bt || typeof bt.requestDevice !== 'function') {
+    return 'This browser has no Web Bluetooth. Open this page in Google Chrome (Android) or desktop Chrome/Edge.';
   }
   return null;
 }
@@ -142,18 +151,32 @@ export class RingLink implements Transport {
 
   static async open(device: BluetoothDevice): Promise<RingLink> {
     if (!device.gatt) throw new Error('device has no GATT server');
-    const gatt = await withTimeout(
-      device.gatt.connect(),
-      CONNECT_TIMEOUT_MS,
-      'Bluetooth connect (is another app holding the ring? put it on the charger and retry)',
+    const stage = async <T,>(what: string, p: Promise<T>): Promise<T> => {
+      protocolLog.push('info', `${what}…`);
+      try {
+        return await p;
+      } catch (e) {
+        const err = e instanceof Error ? e : new Error(String(e));
+        protocolLog.push('info', `${what} failed: ${err.name}: ${err.message}`);
+        // Keep the DOMException name for explainBluetoothError, but say which step failed.
+        const wrapped = new DOMException(`${err.message} (while: ${what})`, err.name);
+        throw wrapped;
+      }
+    };
+    const gatt = await stage(
+      'connecting',
+      withTimeout(device.gatt.connect(), CONNECT_TIMEOUT_MS, 'Bluetooth connect (is another app holding the ring? put it on the charger and retry)'),
     );
-    const service = await gatt.getPrimaryService(OURA_SERVICE);
-    const chars = await service.getCharacteristics();
+    const service = await stage('opening the Oura service', gatt.getPrimaryService(OURA_SERVICE));
+    const chars = await stage('listing characteristics', service.getCharacteristics());
     const writeChar = chars.find((c) => c.uuid === OURA_WRITE);
     if (!writeChar) throw new Error(`write characteristic ${OURA_WRITE} not found`);
 
     const link = new RingLink(device, writeChar);
-    for (const c of chars) {
+    // Every ring response arrives on 98ed0003 (verified on a reset Ring 4), so only it
+    // is required. The extra channels (0004/0005/0006) are subscribed best-effort.
+    const ordered = [...chars].sort((a, b) => Number(b.uuid === OURA_NOTIFY) - Number(a.uuid === OURA_NOTIFY));
+    for (const c of ordered) {
       if (!c.properties.notify && !c.properties.indicate) continue;
       c.addEventListener('characteristicvaluechanged', (ev) => {
         const value = (ev.target as BluetoothRemoteGATTCharacteristic).value;
@@ -162,9 +185,15 @@ export class RingLink implements Transport {
         protocolLog.push('rx', toHex(frame));
         link.listeners.forEach((fn) => fn(frame));
       });
-      // On Android this is where the OS bonds (pairing prompt) if the ring
-      // demands an encrypted link.
-      await c.startNotifications();
+      const short = c.uuid.slice(4, 8);
+      if (c.uuid === OURA_NOTIFY) {
+        await stage(`subscribing to channel ${short}`, c.startNotifications());
+      } else {
+        await c.startNotifications().then(
+          () => protocolLog.push('info', `subscribed to optional channel ${short}`),
+          (e) => protocolLog.push('info', `optional channel ${short} unavailable: ${e?.name}: ${e?.message}`),
+        );
+      }
     }
     device.addEventListener('gattserverdisconnected', link.onDisconnected);
     return link;

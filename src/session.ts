@@ -30,12 +30,15 @@ export class RingSession {
     if (!forcePicker && this.link?.connected && this.client) return this.client;
     if (forcePicker) {
       this.disconnect();
-      this.device = undefined;
-    }
-    this.device ??= (await RingLink.known(deviceId)) ?? undefined;
-    if (!this.device) {
+      // Open the picker before any other await so it stays tied to the user's tap.
       step('Choose your ring in the Bluetooth picker…');
       this.device = await RingLink.pick(this.showAllDevices);
+    } else if (!this.device) {
+      this.device = (await RingLink.known(deviceId)) ?? undefined;
+      if (!this.device) {
+        step('Choose your ring in the Bluetooth picker…');
+        this.device = await RingLink.pick(this.showAllDevices);
+      }
     }
     step(`Connecting to ${this.device.name ?? 'ring'}…`);
     this.link = await RingLink.open(this.device);

@@ -34,16 +34,20 @@ body {
   padding: env(safe-area-inset-top) 0 calc(72px + env(safe-area-inset-bottom));
 }
 
-.top {
+.sticky {
   position: sticky;
   top: 0;
   z-index: 2;
+  padding-bottom: 4px;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.top {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 14px 16px;
-  background: color-mix(in srgb, var(--bg) 92%, transparent);
-  backdrop-filter: blur(8px);
 }
 
 .brand {

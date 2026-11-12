@@ -140,6 +140,7 @@ export function App() {
 
   return (
     <div class="app">
+      <div class="sticky">
       <header class="top">
         <div class="brand">
           <span class="logo" aria-hidden="true" />
@@ -189,6 +190,7 @@ export function App() {
           Back up your ring key (Ring tab). Without it, clearing this browser's data means factory-resetting the ring to pair again.
         </div>
       )}
+      </div>
 
       <main>
         {!ring && <Onboarding run={run} disabled={!!busy || !!support} onPaired={refresh} />}
@@ -212,8 +214,26 @@ export function App() {
 
 type Run = <T>(label: string, fn: (step: (m: string) => void) => Promise<T>) => Promise<T | undefined>;
 
+function LogView() {
+  const [log, setLog] = useState<readonly LogEntry[]>([]);
+  useEffect(() => {
+    const update = () => setLog([...protocolLog.entries()]);
+    update();
+    return protocolLog.subscribe(update);
+  }, []);
+  return (
+    <pre class="log">
+      {log
+        .slice(-200)
+        .map((l) => `${new Date(l.t).toLocaleTimeString()} ${l.dir === 'tx' ? '→' : l.dir === 'rx' ? '←' : '•'} ${l.text}`)
+        .join('\n') || 'Nothing yet. Tap Check connection, then come back here.'}
+    </pre>
+  );
+}
+
 function Troubleshoot() {
   const [all, setAll] = useState(session.showAllDevices);
+  const [showLog, setShowLog] = useState(false);
   return (
     <details class="card trouble">
       <summary>Ring not showing up?</summary>
@@ -226,7 +246,7 @@ function Troubleshoot() {
         <li>
           Stop the Oura app so it can't grab the ring: long-press its icon → App info → Force stop (or uninstall it). A ring can only talk to one app at a time.
         </li>
-        <li>In Android Bluetooth settings, forget any old "Oura" entry.</li>
+        <li>In Android Bluetooth settings, forget every "Oura" entry, including under "Previously connected devices". A leftover bond from the Oura app causes "GATT operations failed".</li>
         <li>Lift the ring off the charger and set it back on: it advertises most reliably right after that.</li>
       </ol>
       <label class="check">
@@ -240,6 +260,8 @@ function Troubleshoot() {
         />
         Show all nearby Bluetooth devices in the picker (use this if the ring still isn't listed)
       </label>
+      <button onClick={() => setShowLog(!showLog)}>{showLog ? 'Hide' : 'Show'} Bluetooth log</button>
+      {showLog && <LogView />}
     </details>
   );
 }
@@ -483,15 +505,7 @@ function RingTab({ ring, sync, run, disabled, onChange }: { ring: RingRecord; sy
   const [features, setFeatures] = useState<Awaited<ReturnType<typeof readFeatures>> | null>(null);
   const [counts, setCounts] = useState<[string, number][] | null>(null);
   const [showKey, setShowKey] = useState(false);
-  const [log, setLog] = useState<readonly LogEntry[]>([]);
   const [showLog, setShowLog] = useState(false);
-
-  useEffect(() => {
-    if (!showLog) return;
-    const update = () => setLog([...protocolLog.entries()]);
-    update();
-    return protocolLog.subscribe(update);
-  }, [showLog]);
 
   const markBackedUp = async () => {
     await saveRing({ ...ring, keyBackedUp: true });
@@ -628,14 +642,7 @@ function RingTab({ ring, sync, run, disabled, onChange }: { ring: RingRecord; sy
             Forget ring
           </button>
         </div>
-        {showLog && (
-          <pre class="log">
-            {log
-              .slice(-200)
-              .map((l) => `${new Date(l.t).toLocaleTimeString()} ${l.dir === 'tx' ? '→' : l.dir === 'rx' ? '←' : '•'} ${l.text}`)
-              .join('\n')}
-          </pre>
-        )}
+        {showLog && <LogView />}
       </section>
     </>
   );
