@@ -14,6 +14,8 @@ export class RingSession {
   private link?: RingLink;
   private client?: OuraClient;
   private authedKey?: string;
+  /** The device came from Chrome's remembered permissions, not this session's picker. */
+  private remembered = false;
   /** Show every nearby Bluetooth device in the picker instead of filtering for Oura. */
   showAllDevices = false;
 
@@ -33,12 +35,18 @@ export class RingSession {
       // Open the picker before any other await so it stays tied to the user's tap.
       step('Choose your ring in the Bluetooth picker…');
       this.device = await RingLink.pick(this.showAllDevices);
+      this.remembered = false;
     } else if (!this.device) {
       this.device = (await RingLink.known(deviceId)) ?? undefined;
+      this.remembered = !!this.device;
       if (!this.device) {
         step('Select your ring to reconnect. Chrome asks once each time the app opens; this does not re-pair it.');
         this.device = await RingLink.pick(this.showAllDevices);
       }
+    }
+    if (this.remembered) {
+      step('Looking for your ring nearby…');
+      await RingLink.waitInRange(this.device);
     }
     step(`Connecting to ${this.device.name ?? 'ring'}…`);
     this.link = await RingLink.open(this.device, step);

@@ -155,6 +155,39 @@ export class RingLink implements Transport {
     }
   }
 
+  /**
+   * A device restored from Chrome's remembered permissions can't be connected to
+   * until Chrome has seen it advertise in this session ("no longer in range"), so
+   * listen for one advertisement first.
+   */
+  static async waitInRange(device: BluetoothDevice, timeoutMs = 15_000): Promise<void> {
+    const d = device as BluetoothDevice & { watchAdvertisements?: (o?: { signal?: AbortSignal }) => Promise<void> };
+    if (!d.watchAdvertisements) return;
+    const abort = new AbortController();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const t = setTimeout(() => {
+          device.removeEventListener('advertisementreceived', onAd);
+          reject(new DOMException('The ring was not found nearby. Keep it close (or on its charger) and try again.', 'NotFoundError'));
+        }, timeoutMs);
+        const onAd = () => {
+          clearTimeout(t);
+          device.removeEventListener('advertisementreceived', onAd);
+          resolve();
+        };
+        device.addEventListener('advertisementreceived', onAd);
+        d.watchAdvertisements!({ signal: abort.signal }).catch((e) => {
+          clearTimeout(t);
+          device.removeEventListener('advertisementreceived', onAd);
+          reject(e);
+        });
+      });
+      protocolLog.push('info', 'ring is advertising nearby');
+    } finally {
+      abort.abort();
+    }
+  }
+
   static async open(device: BluetoothDevice, onStage?: (message: string) => void): Promise<RingLink> {
     if (!device.gatt) throw new Error('device has no GATT server');
     const stage = async <T,>(what: string, p: Promise<T>): Promise<T> => {
