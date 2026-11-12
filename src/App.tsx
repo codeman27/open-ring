@@ -324,8 +324,7 @@ function Onboarding({ run, disabled, onPaired }: { run: Run; disabled: boolean; 
           onClick={() =>
             run('Pairing…', async (step) => {
               await pairFreshRing(session, step);
-              onPaired();
-            })
+            }).finally(onPaired)
           }
         >
           Pair ring

@@ -3,7 +3,7 @@
  * client, mirroring the open_oura CLI commands of the same names.
  */
 import { RingLink, protocolLog } from './ble';
-import { OuraClient, FEATURE, FEATURE_MODE, type FeatureStatus } from './client';
+import { AuthError, OuraClient, FEATURE, FEATURE_MODE, type FeatureStatus } from './client';
 import { addReading, commitBatch, db, saveRing, syncState, type RingRecord } from './db';
 import { hex, unhex, type Capability, type DeviceInfo } from './wasm';
 
@@ -108,14 +108,17 @@ const pendingKeyId = (serial: string) => `pendingKey:${serial}`;
  * the measurement features the official app would enable at onboarding.
  */
 export async function pairFreshRing(session: RingSession, step: Step): Promise<RingRecord> {
-  const client = await session.connect(step, undefined, true);
+  // Reuse the link from "Check connection" when it's still up: no second picker.
+  const client = await session.connect(step, undefined, !session.connected);
   step('Reading ring identity…');
   const serial = await client.serial();
   const hardwareId = await client.hardwareId().catch(() => undefined);
   const firmware = await client.firmware().catch(() => undefined);
+  protocolLog.push('info', `pairing ring ${serial} (${hardwareId ?? '?'})`);
 
   const d = await db();
   let keyHex = (await d.get('kv', pendingKeyId(serial))) as string | undefined;
+  const resumed = !!keyHex;
   if (!keyHex) {
     keyHex = hex(crypto.getRandomValues(new Uint8Array(16)));
     await d.put('kv', keyHex, pendingKeyId(serial));
@@ -123,9 +126,28 @@ export async function pairFreshRing(session: RingSession, step: Step): Promise<R
   const key = unhex(keyHex);
 
   step('Installing a new auth key on the ring…');
-  await client.setAuthKey(key);
+  try {
+    await client.setAuthKey(key);
+    protocolLog.push('info', 'auth key installed');
+  } catch (e) {
+    // An earlier attempt may have installed this same key before failing; a keyed
+    // ring refuses SetAuthKey, so check whether our saved key already works.
+    protocolLog.push('info', `set auth key failed: ${e instanceof Error ? e.message : e}`);
+    if (!resumed) throw e;
+    step('A previous pairing attempt may have finished on the ring; checking its key…');
+  }
   step('Verifying the key…');
-  await client.authenticate(key);
+  try {
+    await client.authenticate(key);
+  } catch (e) {
+    if (e instanceof AuthError && e.code === 1) {
+      throw new Error(
+        'This ring already has a different key installed (from another app or device). Factory-reset it again, then pair here without opening the Oura app.',
+      );
+    }
+    throw e;
+  }
+  protocolLog.push('info', 'key verified');
 
   const ring: RingRecord = {
     serial,
