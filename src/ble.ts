@@ -141,9 +141,15 @@ export class RingLink implements Transport {
    */
   static async known(deviceId: string | undefined): Promise<BluetoothDevice | null> {
     const bt = navigator.bluetooth as Bluetooth & { getDevices?: () => Promise<BluetoothDevice[]> };
-    if (!deviceId || !bt.getDevices) return null;
+    if (!deviceId) return null;
+    if (!bt.getDevices) {
+      protocolLog.push('info', 'remembered-device access unavailable (Chrome flag enable-web-bluetooth-new-permissions-backend is off)');
+      return null;
+    }
     try {
-      return (await bt.getDevices()).find((d) => d.id === deviceId) ?? null;
+      const found = (await bt.getDevices()).find((d) => d.id === deviceId) ?? null;
+      protocolLog.push('info', found ? 'reconnecting to the remembered ring (no picker)' : 'ring not in remembered devices; showing picker');
+      return found;
     } catch {
       return null;
     }

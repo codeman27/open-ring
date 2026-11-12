@@ -36,7 +36,7 @@ export class RingSession {
     } else if (!this.device) {
       this.device = (await RingLink.known(deviceId)) ?? undefined;
       if (!this.device) {
-        step('Choose your ring in the Bluetooth picker…');
+        step('Select your ring to reconnect. Chrome asks once each time the app opens; this does not re-pair it.');
         this.device = await RingLink.pick(this.showAllDevices);
       }
     }
