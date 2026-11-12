@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { RingClock, nightKey, spo2FromR, summarize, TAG } from './timeline';
+import { RingClock, baseline, nightKey, spo2FromR, summarize, TAG } from './timeline';
 import type { StoredEvent } from './db';
 
 const NOW = 1_794_000_000;
@@ -26,6 +26,16 @@ describe('RingClock', () => {
     expect(clock.anchored).toBe(false);
     expect(clock.toUnix(4400)).toBe(NOW - 60);
     expect(clock.toUnix(5000 + 10 * 7 * 3600)).toBeNull();
+  });
+});
+
+describe('baseline', () => {
+  const night = (key: string, avgHrv?: number) => ({ key, hrvSamples: 0, avgHrv });
+
+  it('averages prior nights only and needs three of them', () => {
+    expect(baseline([night('a', 50), night('b', 60), night('c', 999)], (n) => n.avgHrv)).toBeUndefined();
+    const b = baseline([night('a', 50), night('b', 60), night('c'), night('d', 70), night('e', 999)], (n) => n.avgHrv);
+    expect(b).toEqual({ avg: 60, min: 50, max: 70, n: 3 });
   });
 });
 

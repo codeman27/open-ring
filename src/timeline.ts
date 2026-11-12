@@ -260,6 +260,32 @@ export function summarize(events: StoredEvent[], clock: RingClock): Summary {
   };
 }
 
+export interface Baseline {
+  avg: number;
+  min: number;
+  max: number;
+  n: number;
+}
+
+/**
+ * The user's own recent norm for a nightly metric: mean and range over up to
+ * `window` nights before the latest one. Needs at least 3 prior nights.
+ */
+export function baseline(nights: Night[], pick: (n: Night) => number | undefined, window = 14): Baseline | undefined {
+  const prior = nights
+    .slice(0, -1)
+    .slice(-window)
+    .map(pick)
+    .filter((v): v is number => v !== undefined);
+  if (prior.length < 3) return undefined;
+  return {
+    avg: prior.reduce((a, b) => a + b, 0) / prior.length,
+    min: Math.min(...prior),
+    max: Math.max(...prior),
+    n: prior.length,
+  };
+}
+
 /** Tags the dashboard reads; also the anchor tags the clock needs. */
 export const SUMMARY_TAGS = [
   TAG.TIME_SYNC,
