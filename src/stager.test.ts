@@ -92,4 +92,34 @@ describe('estimateStages', () => {
     expect(out).toBeDefined();
     expect(out!.every((s) => s === 'awake')).toBe(true);
   });
+
+  it('treats brief movement bursts during sleep as restlessness, not wake', () => {
+    const night = buildNight();
+    // A 30 s burst every 20 minutes after sleep onset, like turning over.
+    const motion = night.motion.map((m) => ((m.unix - START) % 1200 === 0 && m.unix - START > 1800 ? { ...m, sec: 15 } : m));
+    const out = estimateStages({ ...night, motion })!;
+    const awakeAfterOnset = count(out.slice(60), 'awake');
+    expect(awakeAfterOnset).toBeLessThan(10);
+  });
+
+  it('reads missing motion events as stillness (the ring only reports movement)', () => {
+    const night = buildNight();
+    const out = estimateStages({ ...night, motion: night.motion.filter((m) => m.sec > 0) })!;
+    expect(count(out, 'awake')).toBeLessThan(60);
+    expect(count(out, 'deep')).toBeGreaterThan(0);
+  });
+
+  it('keeps deep sleep early when heart rate drifts down across the night', () => {
+    const night = buildNight();
+    const hr = night.hr.map((p) => ({ ...p, bpm: p.bpm + 10 * (1 - (p.unix - START) / (END - START)) }));
+    const out = estimateStages({ ...night, hr })!;
+    const half = out.length / 2;
+    expect(count(out.slice(0, half), 'deep')).toBeGreaterThan(count(out.slice(half), 'deep'));
+  });
+
+  it('produces stage blocks rather than flicker', () => {
+    const out = estimateStages(buildNight())!;
+    const transitions = out.filter((s, i) => i > 0 && s !== out[i - 1]).length;
+    expect(transitions).toBeLessThan(8 * 8);
+  });
 });

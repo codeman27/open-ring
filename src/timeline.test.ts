@@ -126,4 +126,19 @@ describe('summarize hypnogram assembly', () => {
       latencyMin: 0, efficiency: 1, wakeAfterOnset: 0, // no awake epochs at all
     });
   });
+
+  it('estimates stages for a night without ring phase pages', () => {
+    const clock = new RingClock([{ ts: 0, unix: NOW }], undefined, NOW + 86400);
+    const bedStartDs = 20 * 3600 * 10;
+    const hours = 3;
+    const events = [ev(TAG.BEDTIME, bedStartDs + (hours * 3600 + 60) * 10, { bedtime_start_ds: bedStartDs, bedtime_end_ds: bedStartDs + hours * 3600 * 10 })];
+    for (let s = 0; s < hours * 3600; s += 60) {
+      events.push(ev(TAG.GREEN_IBI, bedStartDs + s * 10, { hr_bpm: [55 + (s % 600 === 0 ? 3 : 0)] }));
+      if (s < 600) events.push(ev(TAG.MOTION, bedStartDs + s * 10, { motion_seconds: 12 }));
+    }
+    const n = summarize(events, clock).nights.find((x) => x.bedtimeStart !== undefined);
+    expect(n?.stages?.source).toBe('estimated');
+    expect(n?.stages?.epochs.length).toBe(hours * 120);
+    expect(n?.stageStats?.sleepMin).toBeGreaterThan(60);
+  });
 });

@@ -114,8 +114,10 @@ instantiate WebAssembly) and `Permissions-Policy` grants `bluetooth=(self)`.
 - Sleep stages use the ring's own firmware staging (`sleep_phase_*` events) when
   it stores them, anchored at the night's bedtime since the pages carry no start
   time. Rings that don't (Ring 4 emits none; Oura stages on the phone with a
-  proprietary model) get an on-device estimate from motion, heart rate and HRV
-  (`src/stager.ts`), labelled "Estimated". Expect totals to differ from the Oura
+  proprietary model) get an on-device estimate (`src/stager.ts`, labelled
+  "Estimated") from `motion_event` (sent only when moving, so absent = still),
+  `sleep_acm_period`, overnight IBI heart rate and HRV, tuned against a
+  Fitbit-scored Ring 4 night. Expect totals to differ from the Oura
   app, especially for the estimate.
 - Event dating uses the nearest `time_sync`/`rtc_beacon` anchor; open_health's full
   reboot-epoch handling isn't ported yet.

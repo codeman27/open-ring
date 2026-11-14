@@ -26,6 +26,7 @@ export const TAG = {
   SLEEP_PHASE_DATA: 0x5a,
   SPO2: 0x6f,
   SLEEP_TEMP: 0x75,
+  SLEEP_ACM: 0x72,
   BEDTIME: 0x76,
   GREEN_IBI: 0x80,
   RTC_BEACON: 0x85,
@@ -203,6 +204,7 @@ export function summarize(events: StoredEvent[], clock: RingClock): Summary {
   const hrSeries: { unix: number; bpm: number }[] = [];
   const activity: { unix: number; met: number[] }[] = [];
   const motion: { unix: number; sec: number }[] = [];
+  const acm: { unix: number; mad: number }[] = [];
   let battery: Summary['battery'];
   let undated = 0;
 
@@ -260,6 +262,11 @@ export function summarize(events: StoredEvent[], clock: RingClock): Summary {
       case TAG.MOTION: {
         const sec = (e.decoded as { motion_seconds?: number }).motion_seconds;
         if (typeof sec === 'number') motion.push({ unix, sec });
+        break;
+      }
+      case TAG.SLEEP_ACM: {
+        const mad = nums(e, 'acm_mad');
+        if (mad.length >= 3) acm.push({ unix, mad: mad[0] + mad[1] + mad[2] });
         break;
       }
       case TAG.SLEEP_TEMP:
@@ -322,7 +329,7 @@ export function summarize(events: StoredEvent[], clock: RingClock): Summary {
         const hrv = n.hrvSeries.sort((a, b) => a.unix - b.unix);
         return {
           ...n,
-          ...hypnogram(n, _ph, { motion: motion.filter(inBed), hr, rmssd: hrv }),
+          ...hypnogram(n, _ph, { motion: motion.filter(inBed), acm: acm.filter(inBed), hr, rmssd: hrv }),
           hrSeries: [...hr].sort((a, b) => a.unix - b.unix),
           hrvSeries: hrv,
           lowestHr: _hr.length ? Math.min(..._hr) : hr.length ? Math.round(Math.min(...hr.map((p) => p.bpm))) : undefined,
@@ -356,7 +363,7 @@ export function summarize(events: StoredEvent[], clock: RingClock): Summary {
 function hypnogram(
   n: Night,
   pages: { tag: number; unix: number; page: number; phases: Stage[] }[],
-  signals: { motion: { unix: number; sec: number }[]; hr: { unix: number; bpm: number }[]; rmssd: { unix: number; ms: number }[] },
+  signals: { motion: { unix: number; sec: number }[]; acm: { unix: number; mad: number }[]; hr: { unix: number; bpm: number }[]; rmssd: { unix: number; ms: number }[] },
 ): Pick<Night, 'stages' | 'stageStats'> {
   if (!pages.length) {
     if (n.bedtimeStart === undefined || n.bedtimeEnd === undefined) return {};
@@ -433,6 +440,7 @@ export const SUMMARY_TAGS = [
   TAG.SLEEP_PHASE_DATA,
   TAG.SLEEP_TEMP,
   TAG.MOTION,
+  TAG.SLEEP_ACM,
   TAG.SPO2_R_PI,
   TAG.SPO2,
   TAG.BEDTIME,
