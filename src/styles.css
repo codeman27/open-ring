@@ -1669,3 +1669,11 @@ button.pill.active {
   border-left: 2px solid var(--line);
   font-size: 0.9rem;
 }
+
+.est-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px dashed var(--muted);
+  font-size: 0.7rem;
+  color: var(--muted);
+}

@@ -9,10 +9,12 @@
  * misdated.
  */
 import type { StoredEvent, SyncState } from './db';
+import { estimateStages } from './stager';
 
 export const TAG = {
   TIME_SYNC: 0x42,
   TEMP: 0x46,
+  MOTION: 0x47,
   ACTIVITY: 0x50,
   HRV: 0x5d,
   IBI_AMP: 0x60,
@@ -165,8 +167,8 @@ export interface Night {
   breathRate?: number;
   skinTemp?: number;
   spo2?: number;
-  /** The ring's own 30 s hypnogram, starting at `start`. */
-  stages?: { start: number; epochs: Stage[] };
+  /** 30 s hypnogram starting at `start`: the ring's own, or estimated on-device. */
+  stages?: { start: number; epochs: Stage[]; source: 'ring' | 'estimated' };
   stageStats?: StageStats;
   hrSeries?: { unix: number; bpm: number }[];
   hrvSeries?: { unix: number; ms: number }[];
@@ -196,17 +198,18 @@ const nums = (e: StoredEvent, field: string): number[] => ((e.decoded?.[field] a
 export function summarize(events: StoredEvent[], clock: RingClock): Summary {
   type Phases = { tag: number; unix: number; page: number; phases: Stage[] };
   type Building = Night & Required<Pick<Night, 'hrSeries' | 'hrvSeries'>>;
-  const nights = new Map<string, Building & { _hr: number[]; _hrv: number[]; _shr: number[]; _br: number[]; _t: number[]; _o2: number[]; _ph: Phases[] }>();
+  const nights = new Map<string, Building & { _hr: number[]; _hrv: number[]; _shr: number[]; _br: number[]; _t: number[]; _o2: number[]; _ph: Phases[]; _hrPts: { unix: number; bpm: number }[] }>();
   const days = new Map<string, { hr: number[]; met: number[] }>();
   const hrSeries: { unix: number; bpm: number }[] = [];
   const activity: { unix: number; met: number[] }[] = [];
+  const motion: { unix: number; sec: number }[] = [];
   let battery: Summary['battery'];
   let undated = 0;
 
   const night = (key: string) => {
     let n = nights.get(key);
     if (!n) {
-      n = { key, hrvSamples: 0, hrSeries: [], hrvSeries: [], _hr: [], _hrv: [], _shr: [], _br: [], _t: [], _o2: [], _ph: [] };
+      n = { key, hrvSamples: 0, hrSeries: [], hrvSeries: [], _hr: [], _hrv: [], _shr: [], _br: [], _t: [], _o2: [], _ph: [], _hrPts: [] };
       nights.set(key, n);
     }
     return n;
@@ -234,6 +237,7 @@ export function summarize(events: StoredEvent[], clock: RingClock): Summary {
         n.hrvSamples += rmssd.length;
         // One sample per 5 min, the last at the event time.
         nums(e, 'rmssd_ms').forEach((ms, i, all) => ms > 0 && n.hrvSeries.push({ unix: unix - (all.length - 1 - i) * 300, ms }));
+        nums(e, 'hr_bpm').forEach((bpm, i, all) => bpm > 0 && n._hrPts.push({ unix: unix - (all.length - 1 - i) * 300, bpm }));
         break;
       }
       case TAG.SLEEP_PERIOD: {
@@ -251,6 +255,11 @@ export function summarize(events: StoredEvent[], clock: RingClock): Summary {
       case TAG.SLEEP_PHASE_DATA: {
         const d = e.decoded as { header?: number; phases?: Stage[] };
         if (d.phases?.length) night(nightKey(unix))._ph.push({ tag: e.tag, unix, page: d.header ?? 0, phases: d.phases });
+        break;
+      }
+      case TAG.MOTION: {
+        const sec = (e.decoded as { motion_seconds?: number }).motion_seconds;
+        if (typeof sec === 'number') motion.push({ unix, sec });
         break;
       }
       case TAG.SLEEP_TEMP:
@@ -305,18 +314,25 @@ export function summarize(events: StoredEvent[], clock: RingClock): Summary {
   const round = (x: number | undefined, p = 0) => (x === undefined ? undefined : Math.round(x * 10 ** p) / 10 ** p);
   return {
     nights: [...nights.values()]
-      .map(({ _hr, _hrv, _shr, _br, _t, _o2, _ph, ...n }) => ({
-        ...n,
-        ...hypnogram(n, _ph),
-        hrSeries: n.hrSeries.sort((a, b) => a.unix - b.unix),
-        hrvSeries: n.hrvSeries.sort((a, b) => a.unix - b.unix),
-        lowestHr: _hr.length ? Math.min(..._hr) : undefined,
-        avgHrv: round(mean(_hrv)),
-        avgSleepHr: round(mean(_shr)),
-        breathRate: round(mean(_br), 1),
-        skinTemp: round(mean(_t), 2),
-        spo2: round(mean(_o2)),
-      }))
+      .map(({ _hr, _hrv, _shr, _br, _t, _o2, _ph, _hrPts, ...n }) => {
+        const inBed = (p: { unix: number }) => n.bedtimeStart !== undefined && n.bedtimeEnd !== undefined && p.unix >= n.bedtimeStart && p.unix <= n.bedtimeEnd;
+        // Rings without sleep_period events (e.g. Ring 4) still record IBI heart rate
+        // overnight, plus the 5-minute averages in hrv_event.
+        const hr = n.hrSeries.length ? n.hrSeries : [...hrSeries.filter(inBed), ..._hrPts.filter(inBed)];
+        const hrv = n.hrvSeries.sort((a, b) => a.unix - b.unix);
+        return {
+          ...n,
+          ...hypnogram(n, _ph, { motion: motion.filter(inBed), hr, rmssd: hrv }),
+          hrSeries: [...hr].sort((a, b) => a.unix - b.unix),
+          hrvSeries: hrv,
+          lowestHr: _hr.length ? Math.min(..._hr) : hr.length ? Math.round(Math.min(...hr.map((p) => p.bpm))) : undefined,
+          avgHrv: round(mean(_hrv)),
+          avgSleepHr: round(mean(_shr)),
+          breathRate: round(mean(_br), 1),
+          skinTemp: round(mean(_t), 2),
+          spo2: round(mean(_o2)),
+        };
+      })
       .sort((a, b) => a.key.localeCompare(b.key)),
     days: [...days.entries()]
       .map(([key, d]) => ({ key, medianHr: round(median(d.hr)), hrSamples: d.hr.length, avgMet: round(mean(d.met), 2) }))
@@ -330,14 +346,23 @@ export function summarize(events: StoredEvent[], clock: RingClock): Summary {
 }
 
 /**
- * Assemble the ring's hypnogram for a night. Rings emit it under one of three
+ * Assemble the ring's hypnogram for a night, or estimate one from motion and
+ * heart rate when the ring doesn't store stages. Rings emit it under one of three
  * tags, in pages of 30 s epochs; the tag with the most epochs wins so pages
  * aren't double-counted. The pages carry no start time, so the hypnogram is
  * anchored at bedtime and trimmed to it (dropping zero padding, which decodes
  * as 'deep'); without a bedtime it is assumed to end at the last page.
  */
-function hypnogram(n: Night, pages: { tag: number; unix: number; page: number; phases: Stage[] }[]): Pick<Night, 'stages' | 'stageStats'> {
-  if (!pages.length) return {};
+function hypnogram(
+  n: Night,
+  pages: { tag: number; unix: number; page: number; phases: Stage[] }[],
+  signals: { motion: { unix: number; sec: number }[]; hr: { unix: number; bpm: number }[]; rmssd: { unix: number; ms: number }[] },
+): Pick<Night, 'stages' | 'stageStats'> {
+  if (!pages.length) {
+    if (n.bedtimeStart === undefined || n.bedtimeEnd === undefined) return {};
+    const epochs = estimateStages({ start: n.bedtimeStart, end: n.bedtimeEnd, ...signals });
+    return epochs ? { stages: { start: n.bedtimeStart, epochs, source: 'estimated' }, stageStats: stageStats(epochs) } : {};
+  }
   const byTag = new Map<number, typeof pages>();
   for (const p of pages) byTag.set(p.tag, [...(byTag.get(p.tag) ?? []), p]);
   const total = (ps: typeof pages) => ps.reduce((a, p) => a + p.phases.length, 0);
@@ -350,7 +375,7 @@ function hypnogram(n: Night, pages: { tag: number; unix: number; page: number; p
   } else {
     start = best[best.length - 1].unix - epochs.length * EPOCH_S;
   }
-  return { stages: { start, epochs }, stageStats: stageStats(epochs) };
+  return { stages: { start, epochs, source: 'ring' }, stageStats: stageStats(epochs) };
 }
 
 const DEFAULT_MET_BIN_S = 60;
@@ -407,6 +432,7 @@ export const SUMMARY_TAGS = [
   TAG.SLEEP_PHASE_DETAILS,
   TAG.SLEEP_PHASE_DATA,
   TAG.SLEEP_TEMP,
+  TAG.MOTION,
   TAG.SPO2_R_PI,
   TAG.SPO2,
   TAG.BEDTIME,

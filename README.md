@@ -27,6 +27,7 @@ future native Android app can reuse the same Rust crate through JNI.
 | `src/timeline.ts` | Ring-clock → wall-clock dating and nightly/daily metrics |
 | `src/scores.ts` | On-device Readiness / Sleep / Activity score estimates |
 | `src/exercise.ts` | On-device workout detection from MET + heart rate |
+| `src/stager.ts` | Estimated sleep stages from motion + heart rate for rings that don't store a hypnogram |
 | `src/activity.ts` | Workout type tags and suggestions learned from them (nearest tagged workouts, starter rules) |
 | `src/App.tsx` | UI (Preact); `readiness.tsx`, `sleep.tsx` and `exercises.tsx` hold the Today hero, Sleep tab and Exercise tab |
 
@@ -110,9 +111,11 @@ instantiate WebAssembly) and `Permissions-Policy` grants `bluetooth=(self)`.
   similar tagged ones, with simple rules as a first guess. Oura's own activity
   model is proprietary and isn't bundled.
   Exercise heart rate comes from the IBI stream; `ehr_trace` (0x73) isn't decoded yet.
-- Sleep stages are the ring's own firmware staging (`sleep_phase_*` events),
-  not the phone-side SleepNet model Oura's app uses (its key is server-delivered),
-  so stage totals can differ from the Oura app. The pages carry no start time, so
-  the hypnogram is anchored at the night's bedtime.
+- Sleep stages use the ring's own firmware staging (`sleep_phase_*` events) when
+  it stores them, anchored at the night's bedtime since the pages carry no start
+  time. Rings that don't (Ring 4 emits none; Oura stages on the phone with a
+  proprietary model) get an on-device estimate from motion, heart rate and HRV
+  (`src/stager.ts`), labelled "Estimated". Expect totals to differ from the Oura
+  app, especially for the estimate.
 - Event dating uses the nearest `time_sync`/`rtc_beacon` anchor; open_health's full
   reboot-epoch handling isn't ported yet.

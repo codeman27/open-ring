@@ -136,10 +136,14 @@ function NightDetail({ night, nightsUpTo }: { night: Night; nightsUpTo: Night[] 
       <section class="card">
         <div class="card-head">
           <h2>Sleep stages</h2>
+          {night.stages?.source === 'estimated' && <span class="est-badge">Estimated</span>}
         </div>
         {night.stages && st ? (
           <>
             <Hypnogram start={night.stages.start} epochs={night.stages.epochs} />
+            {night.stages.source === 'estimated' && (
+              <p class="muted small">Your ring doesn't store sleep stages, so these are estimated on this phone from movement, heart rate and HRV. Totals are a rough guide.</p>
+            )}
             <div class="stage-legend">
               {STAGES.map((s) => {
                 const m = minutesOf(night, s.key);
@@ -156,7 +160,7 @@ function NightDetail({ night, nightsUpTo }: { night: Night; nightsUpTo: Night[] 
             </div>
           </>
         ) : (
-          <p class="muted small">Sleep stages appear once the ring has finished its overnight analysis and you sync in the morning.</p>
+          <p class="muted small">Not enough overnight movement and heart-rate data to show sleep stages for this night.</p>
         )}
       </section>
 
@@ -268,7 +272,7 @@ export function SleepTab({ summary }: { summary: Summary | null }) {
           );
         })}
       </section>
-      <p class="footnote">Sleep stages come from the ring's own on-device staging; Oura's app refines them with a cloud-keyed model, so totals can differ a little.</p>
+      <p class="footnote">Stages come from the ring when it stores them, otherwise they're estimated on this phone. Either way they can differ from the Oura app.</p>
     </>
   );
 }

@@ -83,7 +83,7 @@ function stagedSleepScore(night: Night): ScoreResult | undefined {
   ];
   const timing = timingScore(night);
   if (timing !== undefined) out.push({ label: 'Timing', weight: 10, score: timing });
-  return combine(out, false);
+  return combine(out, night.stages?.source === 'estimated');
 }
 
 export function sleepScore(nights: Night[]): ScoreResult | undefined {
