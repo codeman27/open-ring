@@ -19,6 +19,9 @@ export const TAG = {
   DEBUG_DATA: 0x61,
   TEMP_PERIOD: 0x69,
   SLEEP_PERIOD: 0x6a,
+  SLEEP_PHASE_INFO: 0x4b,
+  SLEEP_PHASE_DETAILS: 0x4e,
+  SLEEP_PHASE_DATA: 0x5a,
   SPO2: 0x6f,
   SLEEP_TEMP: 0x75,
   BEDTIME: 0x76,
@@ -113,6 +116,43 @@ const median = (xs: number[]) => {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 };
 
+export type Stage = 'deep' | 'light' | 'rem' | 'awake';
+
+export const EPOCH_S = 30;
+
+export interface StageStats {
+  deepMin: number;
+  lightMin: number;
+  remMin: number;
+  awakeMin: number;
+  sleepMin: number;
+  /** Minutes in bed before the first sleep epoch. */
+  latencyMin: number;
+  /** Asleep share of time in bed, 0..1. */
+  efficiency: number;
+  /** Awake share of the time after first falling asleep, 0..1. */
+  wakeAfterOnset: number;
+}
+
+export function stageStats(epochs: Stage[]): StageStats | undefined {
+  if (!epochs.length) return undefined;
+  const min = (n: number) => Math.round((n * EPOCH_S) / 60);
+  const count = (st: Stage) => epochs.filter((e) => e === st).length;
+  const onset = epochs.findIndex((e) => e !== 'awake');
+  const asleep = epochs.length - count('awake');
+  const afterOnset = onset < 0 ? [] : epochs.slice(onset);
+  return {
+    deepMin: min(count('deep')),
+    lightMin: min(count('light')),
+    remMin: min(count('rem')),
+    awakeMin: min(count('awake')),
+    sleepMin: min(asleep),
+    latencyMin: min(onset < 0 ? epochs.length : onset),
+    efficiency: Math.round((asleep / epochs.length) * 100) / 100,
+    wakeAfterOnset: afterOnset.length ? Math.round((afterOnset.filter((e) => e === 'awake').length / afterOnset.length) * 100) / 100 : 1,
+  };
+}
+
 export interface Night {
   key: string;
   bedtimeStart?: number;
@@ -125,6 +165,11 @@ export interface Night {
   breathRate?: number;
   skinTemp?: number;
   spo2?: number;
+  /** The ring's own 30 s hypnogram, starting at `start`. */
+  stages?: { start: number; epochs: Stage[] };
+  stageStats?: StageStats;
+  hrSeries?: { unix: number; bpm: number }[];
+  hrvSeries?: { unix: number; ms: number }[];
 }
 
 export interface Day {
@@ -138,6 +183,8 @@ export interface Summary {
   nights: Night[];
   days: Day[];
   hrSeries: { unix: number; bpm: number }[];
+  /** One point per MET bin, at the bin's end time. */
+  metSeries: { unix: number; met: number }[];
   battery?: { pct: number; unix: number };
   undated: number;
   anchored: boolean;
@@ -147,16 +194,19 @@ type Num = number[] | undefined;
 const nums = (e: StoredEvent, field: string): number[] => ((e.decoded?.[field] as Num) ?? []).filter((x) => typeof x === 'number');
 
 export function summarize(events: StoredEvent[], clock: RingClock): Summary {
-  const nights = new Map<string, Night & { _hr: number[]; _hrv: number[]; _shr: number[]; _br: number[]; _t: number[]; _o2: number[] }>();
+  type Phases = { tag: number; unix: number; page: number; phases: Stage[] };
+  type Building = Night & Required<Pick<Night, 'hrSeries' | 'hrvSeries'>>;
+  const nights = new Map<string, Building & { _hr: number[]; _hrv: number[]; _shr: number[]; _br: number[]; _t: number[]; _o2: number[]; _ph: Phases[] }>();
   const days = new Map<string, { hr: number[]; met: number[] }>();
   const hrSeries: { unix: number; bpm: number }[] = [];
+  const activity: { unix: number; met: number[] }[] = [];
   let battery: Summary['battery'];
   let undated = 0;
 
   const night = (key: string) => {
     let n = nights.get(key);
     if (!n) {
-      n = { key, hrvSamples: 0, _hr: [], _hrv: [], _shr: [], _br: [], _t: [], _o2: [] };
+      n = { key, hrvSamples: 0, hrSeries: [], hrvSeries: [], _hr: [], _hrv: [], _shr: [], _br: [], _t: [], _o2: [], _ph: [] };
       nights.set(key, n);
     }
     return n;
@@ -182,13 +232,25 @@ export function summarize(events: StoredEvent[], clock: RingClock): Summary {
         n._hr.push(...hr);
         n._hrv.push(...rmssd);
         n.hrvSamples += rmssd.length;
+        // One sample per 5 min, the last at the event time.
+        nums(e, 'rmssd_ms').forEach((ms, i, all) => ms > 0 && n.hrvSeries.push({ unix: unix - (all.length - 1 - i) * 300, ms }));
         break;
       }
       case TAG.SLEEP_PERIOD: {
         const n = night(nightKey(unix));
         const d = e.decoded as { average_hr?: number; breath?: number };
-        if (d.average_hr) n._shr.push(d.average_hr);
+        if (d.average_hr) {
+          n._shr.push(d.average_hr);
+          n.hrSeries.push({ unix, bpm: d.average_hr });
+        }
         if (d.breath) n._br.push(d.breath);
+        break;
+      }
+      case TAG.SLEEP_PHASE_INFO:
+      case TAG.SLEEP_PHASE_DETAILS:
+      case TAG.SLEEP_PHASE_DATA: {
+        const d = e.decoded as { header?: number; phases?: Stage[] };
+        if (d.phases?.length) night(nightKey(unix))._ph.push({ tag: e.tag, unix, page: d.header ?? 0, phases: d.phases });
         break;
       }
       case TAG.SLEEP_TEMP:
@@ -224,9 +286,12 @@ export function summarize(events: StoredEvent[], clock: RingClock): Summary {
         }
         break;
       }
-      case TAG.ACTIVITY:
-        day(dayKey(unix)).met.push(...nums(e, 'met'));
+      case TAG.ACTIVITY: {
+        const met = nums(e, 'met');
+        day(dayKey(unix)).met.push(...met);
+        if (met.length) activity.push({ unix, met });
         break;
+      }
       case TAG.DEBUG_DATA: {
         const d = e.decoded as { kind?: string; battery_pct?: number };
         if (d.kind === 'battery_level_changed' && typeof d.battery_pct === 'number' && (!battery || unix > battery.unix)) {
@@ -240,8 +305,11 @@ export function summarize(events: StoredEvent[], clock: RingClock): Summary {
   const round = (x: number | undefined, p = 0) => (x === undefined ? undefined : Math.round(x * 10 ** p) / 10 ** p);
   return {
     nights: [...nights.values()]
-      .map(({ _hr, _hrv, _shr, _br, _t, _o2, ...n }) => ({
+      .map(({ _hr, _hrv, _shr, _br, _t, _o2, _ph, ...n }) => ({
         ...n,
+        ...hypnogram(n, _ph),
+        hrSeries: n.hrSeries.sort((a, b) => a.unix - b.unix),
+        hrvSeries: n.hrvSeries.sort((a, b) => a.unix - b.unix),
         lowestHr: _hr.length ? Math.min(..._hr) : undefined,
         avgHrv: round(mean(_hrv)),
         avgSleepHr: round(mean(_shr)),
@@ -254,10 +322,53 @@ export function summarize(events: StoredEvent[], clock: RingClock): Summary {
       .map(([key, d]) => ({ key, medianHr: round(median(d.hr)), hrSamples: d.hr.length, avgMet: round(mean(d.met), 2) }))
       .sort((a, b) => a.key.localeCompare(b.key)),
     hrSeries: hrSeries.sort((a, b) => a.unix - b.unix),
+    metSeries: metSeries(activity),
     battery,
     undated,
     anchored: clock.anchored,
   };
+}
+
+/**
+ * Assemble the ring's hypnogram for a night. Rings emit it under one of three
+ * tags, in pages of 30 s epochs; the tag with the most epochs wins so pages
+ * aren't double-counted. The pages carry no start time, so the hypnogram is
+ * anchored at bedtime and trimmed to it (dropping zero padding, which decodes
+ * as 'deep'); without a bedtime it is assumed to end at the last page.
+ */
+function hypnogram(n: Night, pages: { tag: number; unix: number; page: number; phases: Stage[] }[]): Pick<Night, 'stages' | 'stageStats'> {
+  if (!pages.length) return {};
+  const byTag = new Map<number, typeof pages>();
+  for (const p of pages) byTag.set(p.tag, [...(byTag.get(p.tag) ?? []), p]);
+  const total = (ps: typeof pages) => ps.reduce((a, p) => a + p.phases.length, 0);
+  const best = [...byTag.values()].sort((a, b) => total(b) - total(a))[0].sort((a, b) => a.unix - b.unix || a.page - b.page);
+  let epochs = best.flatMap((p) => p.phases);
+  let start: number;
+  if (n.bedtimeStart !== undefined && n.bedtimeEnd !== undefined) {
+    start = n.bedtimeStart;
+    epochs = epochs.slice(0, Math.round((n.bedtimeEnd - n.bedtimeStart) / EPOCH_S));
+  } else {
+    start = best[best.length - 1].unix - epochs.length * EPOCH_S;
+  }
+  return { stages: { start, epochs }, stageStats: stageStats(epochs) };
+}
+
+const DEFAULT_MET_BIN_S = 60;
+
+/**
+ * Spread each `activity_information` event's MET bins back in time from the
+ * event. The bin length isn't documented, so it is inferred from the gap to the
+ * previous event (falling back to one minute when the gap is implausible).
+ */
+export function metSeries(events: { unix: number; met: number[] }[]): { unix: number; met: number }[] {
+  const sorted = [...events].sort((a, b) => a.unix - b.unix);
+  const out: { unix: number; met: number }[] = [];
+  sorted.forEach((e, i) => {
+    const gap = i > 0 ? (e.unix - sorted[i - 1].unix) / e.met.length : DEFAULT_MET_BIN_S;
+    const bin = gap >= 20 && gap <= 300 ? gap : DEFAULT_MET_BIN_S;
+    e.met.forEach((met, j) => out.push({ unix: e.unix - (e.met.length - 1 - j) * bin, met }));
+  });
+  return out;
 }
 
 export interface Baseline {
@@ -292,6 +403,9 @@ export const SUMMARY_TAGS = [
   TAG.RTC_BEACON,
   TAG.HRV,
   TAG.SLEEP_PERIOD,
+  TAG.SLEEP_PHASE_INFO,
+  TAG.SLEEP_PHASE_DETAILS,
+  TAG.SLEEP_PHASE_DATA,
   TAG.SLEEP_TEMP,
   TAG.SPO2_R_PI,
   TAG.SPO2,

@@ -28,12 +28,17 @@ import {
 } from './session';
 import { RingClock, SUMMARY_TAGS, baseline, dayKey, summarize, type Baseline, type Night, type Summary } from './timeline';
 import { AreaChart, Gauge, RangeBar } from './charts';
+import { ReadinessHero, type ScoreBubble } from './readiness';
+import { ExerciseTab } from './exercises';
+import { SleepTab } from './sleep';
+import { activityScore, readinessScore, sleepScore } from './scores';
 import {
   BatteryIcon,
   BluetoothIcon,
   BoltIcon,
   ChevronIcon,
   DropIcon,
+  ExerciseIcon,
   HeartIcon,
   KeyIcon,
   LungsIcon,
@@ -49,7 +54,7 @@ import { versionLabel } from './version';
 
 const session = new RingSession();
 
-type Tab = 'today' | 'trends' | 'ring';
+type Tab = 'today' | 'sleep' | 'exercise' | 'trends' | 'ring';
 type Run = <T>(label: string, fn: (step: (m: string) => void) => Promise<T>) => Promise<T | undefined>;
 
 const SLEEP_GOAL_H = 8;
@@ -187,19 +192,19 @@ export function App() {
         <header class="top">
           <div>
             <p class="eyebrow">{new Date().toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}</p>
-            <h1>{ring ? (tab === 'today' ? greeting() : tab === 'trends' ? 'Trends' : 'Your ring') : 'Open Ring'}</h1>
+            <h1>{ring ? (tab === 'today' ? greeting() : tab === 'sleep' ? 'Sleep' : tab === 'exercise' ? 'Exercise' : tab === 'trends' ? 'Trends' : 'Your ring') : 'Open Ring'}</h1>
           </div>
           {ring && (
             <div class="top-actions">
-              <span class={`pill ${connected ? 'pill-live' : ''}`} title={`Synced ${fmtAgo(sync?.lastSyncUnix)}`}>
-                {battery !== undefined ? (
-                  <>
-                    <BatteryIcon level={battery} size={18} /> {battery}%
-                  </>
-                ) : (
-                  <RingIcon size={16} />
-                )}
-              </span>
+              <button
+                class={`pill ${connected ? 'pill-live' : ''} ${tab === 'ring' ? 'active' : ''}`}
+                title={`Ring settings · synced ${fmtAgo(sync?.lastSyncUnix)}`}
+                aria-label="Ring settings"
+                onClick={() => setTab('ring')}
+              >
+                <RingIcon size={16} />
+                {battery !== undefined && <span>{battery}%</span>}
+              </button>
               <button class={`icon-btn ${syncing ? 'spin' : ''}`} disabled={disabled} onClick={doSync} aria-label="Sync now">
                 <SyncIcon size={20} />
               </button>
@@ -245,7 +250,9 @@ export function App() {
 
       <main>
         {!ring && <Onboarding run={run} disabled={disabled} onPaired={refresh} />}
-        {ring && tab === 'today' && <Today summary={summary} sync={sync} ring={ring} run={run} disabled={disabled} onSync={doSync} />}
+        {ring && tab === 'today' && <Today summary={summary} sync={sync} ring={ring} run={run} disabled={disabled} onSync={doSync} onOpenSleep={() => setTab('sleep')} />}
+        {ring && tab === 'sleep' && <SleepTab summary={summary} />}
+        {ring && tab === 'exercise' && <ExerciseTab summary={summary} />}
         {ring && tab === 'trends' && <Trends summary={summary} />}
         {ring && tab === 'ring' && (
           <RingTab ring={ring} sync={sync} battery={battery} connected={connected} run={run} disabled={disabled} onChange={refresh} />
@@ -258,8 +265,9 @@ export function App() {
           {(
             [
               ['today', 'Today', TodayIcon],
+              ['sleep', 'Sleep', MoonIcon],
+              ['exercise', 'Exercise', ExerciseIcon],
               ['trends', 'Trends', TrendsIcon],
-              ['ring', 'Ring', RingIcon],
             ] as const
           ).map(([t, label, Icon]) => (
             <button key={t} class={tab === t ? 'active' : ''} onClick={() => setTab(t)}>
@@ -490,17 +498,6 @@ function MetricRow({ m, night, nights }: { m: MetricDef; night: Night; nights: N
   );
 }
 
-function hourTicks(from: number, to: number) {
-  const out: { x: number; label: string }[] = [];
-  const d = new Date(from * 1000);
-  d.setMinutes(0, 0, 0);
-  d.setHours(Math.ceil(d.getHours() / 6) * 6);
-  for (let t = d.getTime() / 1000; t <= to; t += 6 * 3600) {
-    out.push({ x: t, label: new Date(t * 1000).toLocaleTimeString([], { hour: 'numeric' }) });
-  }
-  return out;
-}
-
 function Card({ title, Icon, color, right, children, class: cls = '' }: { title: string; Icon?: MetricDef['Icon']; color?: string; right?: ComponentChildren; children: ComponentChildren; class?: string }) {
   return (
     <section class={`card ${cls}`}>
@@ -527,6 +524,7 @@ function Today({
   run,
   disabled,
   onSync,
+  onOpenSleep,
 }: {
   summary: Summary | null;
   sync: SyncState | null;
@@ -534,6 +532,7 @@ function Today({
   run: Run;
   disabled: boolean;
   onSync: () => void;
+  onOpenSleep: () => void;
 }) {
   const [live, setLive] = useState<number | null>(null);
   const [measuring, setMeasuring] = useState(false);
@@ -542,9 +541,23 @@ function Today({
   const night = nights.at(-1);
   const today = dayKey(Date.now() / 1000);
   const day = summary?.days.find((d) => d.key === today);
-  const now = Date.now() / 1000;
-  const hrToday = useMemo(() => (summary?.hrSeries ?? []).filter((p) => p.unix > now - 86400).map((p) => ({ x: p.unix, y: p.bpm })), [summary]);
   const sleepBase = baseline(nights, (n) => n.sleepHours);
+  const scores = useMemo(
+    () => ({
+      readiness: readinessScore(nights, summary?.days ?? [], SLEEP_GOAL_H),
+      sleep: sleepScore(nights),
+      activity: activityScore(summary?.days ?? [], today),
+    }),
+    [summary, today],
+  );
+  const bubbles: ScoreBubble[] = [
+    { label: 'Readiness', value: scores.readiness?.score, Icon: TodayIcon, crown: (scores.readiness?.score ?? 0) >= 85 },
+    { label: 'Sleep', value: scores.sleep?.score, Icon: MoonIcon, crown: (scores.sleep?.score ?? 0) >= 85 },
+    { label: 'Activity', value: scores.activity?.score, Icon: BoltIcon, crown: (scores.activity?.score ?? 0) >= 85 },
+    { label: 'HRV', value: night?.avgHrv, unit: 'ms', Icon: WaveIcon },
+    { label: 'Resting HR', value: night?.lowestHr, unit: 'bpm', Icon: HeartIcon },
+    { label: 'Blood O₂', value: night?.spo2, unit: '%', Icon: DropIcon },
+  ];
 
   if (!sync?.lastSyncUnix) {
     return (
@@ -563,9 +576,11 @@ function Today({
 
   return (
     <>
-      <section class="card hero">
+      <ReadinessHero readiness={scores.readiness} bubbles={bubbles} seed={night?.key ?? today} />
+
+      <section class="card hero tappable" role="button" tabIndex={0} onClick={onOpenSleep} onKeyDown={(e) => e.key === 'Enter' && onOpenSleep()}>
         <div class="hero-label">
-          <MoonIcon size={16} /> Last night
+          <MoonIcon size={16} /> Last night <ChevronIcon size={14} />
         </div>
         {night ? (
           <>
@@ -607,16 +622,16 @@ function Today({
 
       <Card
         title="Heart rate"
+        class="compact"
         Icon={HeartIcon}
         color="var(--hr)"
         right={
           <span class="big-inline">
             {live ?? day?.medianHr ?? '–'}
-            <small>{live ? 'bpm live' : 'bpm median'}</small>
+            <small>{live ? 'bpm live' : 'bpm today'}</small>
           </span>
         }
       >
-        <AreaChart points={hrToday} color="#ff7a8a" xLabels={hourTicks(now - 86400, now)} emptyText="Daytime heart rate appears after the ring has been worn for a while." />
         {measuring ? (
           <button class="wide live-btn active" onClick={() => liveAbort.current?.abort()}>
             <span class="pulse" /> Measuring… tap to stop

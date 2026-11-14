@@ -25,7 +25,10 @@ future native Android app can reuse the same Rust crate through JNI.
 | `src/session.ts` | Workflows: probe, pair, import key, sync, features, live HR |
 | `src/db.ts` | IndexedDB store: rings, raw events (idempotent), sync cursor, readings, export |
 | `src/timeline.ts` | Ring-clock → wall-clock dating and nightly/daily metrics |
-| `src/App.tsx` | UI (Preact) |
+| `src/scores.ts` | On-device Readiness / Sleep / Activity score estimates |
+| `src/exercise.ts` | On-device workout detection from MET + heart rate |
+| `src/activity.ts` | Workout type tags and suggestions learned from them (nearest tagged workouts, starter rules) |
+| `src/App.tsx` | UI (Preact); `readiness.tsx`, `sleep.tsx` and `exercises.tsx` hold the Today hero, Sleep tab and Exercise tab |
 
 ## Develop
 
@@ -94,8 +97,22 @@ instantiate WebAssembly) and `Permissions-Policy` grants `bluetooth=(self)`.
 
 - Sync only runs while the app is open (no background sync).
 - Chrome may show the device picker once per app launch.
-- Readiness/Sleep scores are not computed (Oura's models are proprietary); the app
-  shows the underlying signals: HRV, lowest HR, SpO2, breathing, skin temperature,
-  time in bed, daytime HR, MET.
+- Readiness, Sleep and Activity scores are on-device estimates (`src/scores.ts`), not
+  Oura's proprietary models. They use the combiner weights recovered in
+  `open_oura/docs/algorithms/score-weights.md`. Sleep uses Oura's seven
+  contributors from the ring's hypnogram; nights without one fall back to time in
+  bed, timing, regularity and SpO2. Baseline-relative
+  contributors (resting HR, HRV, temperature) are left out until 3+ prior nights
+  exist, and the score is marked as an estimate until then.
+- Workouts are detected on-device (Oura classifies them in its cloud): at least
+  10 minutes of MET ≥ 3 outside bedtime. Activity types (Pickleball, Walking, …)
+  come from your own tags: new workouts are suggested the label of the most
+  similar tagged ones, with simple rules as a first guess. Oura's own activity
+  model is proprietary and isn't bundled.
+  Exercise heart rate comes from the IBI stream; `ehr_trace` (0x73) isn't decoded yet.
+- Sleep stages are the ring's own firmware staging (`sleep_phase_*` events),
+  not the phone-side SleepNet model Oura's app uses (its key is server-delivered),
+  so stage totals can differ from the Oura app. The pages carry no start time, so
+  the hypnogram is anchored at the night's bedtime.
 - Event dating uses the nearest `time_sync`/`rtc_beacon` anchor; open_health's full
   reboot-epoch handling isn't ported yet.

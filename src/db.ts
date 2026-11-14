@@ -164,6 +164,14 @@ export async function latestReading(serial: string, kind: Reading['kind']): Prom
   return c?.value;
 }
 
+export async function getKv<T>(key: string): Promise<T | undefined> {
+  return (await (await db()).get('kv', key)) as T | undefined;
+}
+
+export async function setKv(key: string, value: unknown): Promise<void> {
+  await (await db()).put('kv', value, key);
+}
+
 /** Remove a ring and everything stored for it from this device. */
 export async function forgetRing(serial: string): Promise<void> {
   const d = await db();
@@ -191,6 +199,7 @@ export async function exportAll(serial: string): Promise<Blob> {
     sync: await d.get('sync', serial),
     events: await d.getAll('events', range),
     readings: (await d.getAll('readings')).filter((r) => r.serial === serial),
+    activity: { types: await d.get('kv', 'activityTypes'), tags: await d.get('kv', 'activityTags') },
   };
   return new Blob([JSON.stringify(data)], { type: 'application/json' });
 }

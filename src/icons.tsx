@@ -121,6 +121,19 @@ export const KeyIcon = (p: IconProps) => (
   </Svg>
 );
 
+export const ExerciseIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="14" cy="4.5" r="1.8" />
+    <path d="m7 21 3.5-6 3 2.5V22M10.5 15 12 9l-3.5 1.5L6.5 13M12 9l2.5 3 3.5 1" />
+  </Svg>
+);
+
+export const CrownIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 18h16M5 15 3.5 7l5 4L12 5l3.5 6 5-4L19 15Z" fill="currentColor" />
+  </Svg>
+);
+
 export const BatteryIcon = ({ level = 0, ...p }: IconProps & { level?: number }) => {
   const w = (14 * Math.max(0, Math.min(100, level))) / 100;
   return (
