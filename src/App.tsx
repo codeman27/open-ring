@@ -871,7 +871,17 @@ function RingTab({
       <h3 class="section-title">Data</h3>
       <section class="card list-card">
         <Row label="Export all data" onClick={async () => download(`open-ring-${ring.serial}-${dayKey(Date.now() / 1000)}.json`, await exportAll(ring.serial))} />
-        <Row label="Stored readings by type" onClick={async () => setCounts([...(await eventCounts(ring.serial)).entries()].sort((a, b) => b[1] - a[1]))} />
+        <Row
+          label={counts ? 'Hide stored readings' : 'Stored readings by type'}
+          onClick={async () => setCounts(counts ? null : [...(await eventCounts(ring.serial)).entries()].sort((a, b) => b[1] - a[1]))}
+        />
+        {counts && (
+          <div class="sub-list">
+            {counts.map(([name, n]) => (
+              <Row key={name} label={name} value={n.toLocaleString()} />
+            ))}
+          </div>
+        )}
         <Row
           label="Re-download from the ring"
           onClick={async () => {
@@ -881,10 +891,6 @@ function RingTab({
             onChange();
           }}
         />
-        {counts &&
-          counts.map(([name, n]) => (
-            <Row key={name} label={name} value={n.toLocaleString()} />
-          ))}
       </section>
 
       <h3 class="section-title">Device</h3>

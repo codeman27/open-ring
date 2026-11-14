@@ -1663,3 +1663,9 @@ button.pill.active {
 .hypno .chart-x span:first-child {
   transform: translateX(-50%);
 }
+
+.sub-list {
+  margin: 0 0 4px 14px;
+  border-left: 2px solid var(--line);
+  font-size: 0.9rem;
+}
