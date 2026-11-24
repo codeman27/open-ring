@@ -139,7 +139,10 @@ export async function eventsByTag(serial: string, tags: number[]): Promise<Store
   const d = await db();
   const out: StoredEvent[] = [];
   for (const tag of tags) {
-    out.push(...(await d.getAllFromIndex('events', 'by_tag_ts', IDBKeyRange.bound([serial, tag, 0], [serial, tag, Infinity]))));
+    // Append without spreading: an accumulated history can exceed the engine's
+    // call-argument limit, and push(...page) then throws "Maximum call stack size exceeded".
+    const page = await d.getAllFromIndex('events', 'by_tag_ts', IDBKeyRange.bound([serial, tag, 0], [serial, tag, Infinity]));
+    for (const e of page) out.push(e);
   }
   return out;
 }

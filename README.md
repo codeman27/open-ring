@@ -39,7 +39,7 @@ Prerequisites: Node 20+, Rust with `rustup target add wasm32-unknown-unknown`, a
 ```bash
 npm install
 npm run dev          # builds the WASM module, then serves http://localhost:5173
-npm test             # vitest (client + timeline) and the Rust bridge tests
+npm test             # vitest (including large-history IndexedDB regression) + Rust bridge tests
 npm run build        # type-check + production PWA in dist/
 ```
 

@@ -1,7 +1,7 @@
 {
   "name": "oura-pwa",
   "private": true,
-  "version": "0.5.3",
+  "version": "0.5.4",
   "type": "module",
   "description": "Cloud-free Oura ring PWA over Web Bluetooth, built on open_oura's protocol crate",
   "scripts": {
@@ -20,6 +20,7 @@
     "@preact/preset-vite": "^2.10.6",
     "@types/node": "^26.6.6",
     "@types/web-bluetooth": "^0.0.22",
+    "fake-indexeddb": "^6.2.8",
     "preact": "^11.2.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.8",
